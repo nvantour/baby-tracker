@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+  <title>Baby Tracker</title>
+</head>
+<body>
+
+  <!-- Header -->
+  <header id="header">
+    <h1>Baby Tracker</h1>
+    <button id="btn-settings" aria-label="Settings">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+  </header>
+
+  <!-- Main Content — Single Scrollable Page -->
+  <main id="main">
+
+    <!-- Section: Log -->
+    <section class="section">
+      <div class="log-grid">
+        <button class="log-card" id="card-feeding">
+          <span class="log-icon">&#x1F37C;</span>
+          <span class="log-label">Breastfeeding</span>
+        </button>
+        <button class="log-card" id="card-temperature">
+          <span class="log-icon">&#x1F321;</span>
+          <span class="log-label">Temperature</span>
+        </button>
+        <button class="log-card" id="card-pee">
+          <span class="log-icon">&#x1F4A7;</span>
+          <span class="log-label">Pee Diaper</span>
+        </button>
+        <button class="log-card" id="card-poop">
+          <span class="log-icon">&#x1F4A9;</span>
+          <span class="log-label">Poop Diaper</span>
+        </button>
+      </div>
+
+      <!-- Feeding Sub-Panel -->
+      <div id="panel-feeding" class="sub-panel hidden">
+        <div class="panel-header">
+          <h3>Breastfeeding</h3>
+          <button class="panel-close" id="close-feeding" aria-label="Close">&times;</button>
+        </div>
+        <p class="panel-instruction">Choose a side to start the timer</p>
+        <div class="side-buttons">
+          <button class="side-btn" data-side="left">Left</button>
+          <button class="side-btn" data-side="right">Right</button>
+        </div>
+        <div id="timer-section" class="hidden">
+          <div class="timer-display" id="timer-display">00:00</div>
+          <p class="timer-side-label" id="timer-side-label"></p>
+          <div class="timer-actions">
+            <button class="btn-pause" id="btn-pause-timer">Pause</button>
+            <button class="btn-stop" id="btn-stop-timer">Stop &amp; Log</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Temperature Sub-Panel -->
+      <div id="panel-temperature" class="sub-panel hidden">
+        <div class="panel-header">
+          <h3>Temperature</h3>
+          <button class="panel-close" id="close-temperature" aria-label="Close">&times;</button>
+        </div>
+        <div class="stepper">
+          <button class="stepper-btn" id="temp-minus" aria-label="Decrease temperature">&minus;</button>
+          <span class="stepper-value" id="temp-value">37.0</span>
+          <span class="stepper-unit">&deg;C</span>
+          <button class="stepper-btn" id="temp-plus" aria-label="Increase temperature">+</button>
+        </div>
+        <button class="btn-confirm" id="btn-log-temp">Log Temperature</button>
+      </div>
+    </section>
+
+    <!-- Section: Today's Summary -->
+    <section class="section">
+      <h2 class="section-title">Today</h2>
+      <p class="section-subtitle" id="today-date"></p>
+      <div id="today-loading" class="loading hidden">Loading...</div>
+      <div id="today-stats">
+        <div class="stat-row">
+          <div class="stat-card stat-feeding">
+            <div class="stat-icon">&#x1F37C;</div>
+            <div class="stat-content">
+              <div class="stat-value" id="stat-feedings">0</div>
+              <div class="stat-label">feedings</div>
+              <div class="stat-detail" id="stat-feeding-detail">0 min</div>
+            </div>
+          </div>
+          <div class="stat-card stat-temperature">
+            <div class="stat-icon">&#x1F321;</div>
+            <div class="stat-content">
+              <div class="stat-value" id="stat-temperature">&ndash;</div>
+              <div class="stat-label">temp</div>
+              <div class="stat-detail" id="stat-temp-detail"></div>
+            </div>
+          </div>
+          <div class="stat-card stat-pee">
+            <div class="stat-icon">&#x1F4A7;</div>
+            <div class="stat-content">
+              <div class="stat-value" id="stat-pee">0</div>
+              <div class="stat-label">pee</div>
+            </div>
+          </div>
+          <div class="stat-card stat-poop">
+            <div class="stat-icon">&#x1F4A9;</div>
+            <div class="stat-content">
+              <div class="stat-value" id="stat-poop">0</div>
+              <div class="stat-label">poop</div>
+            </div>
+          </div>
+        </div>
+        <div class="stat-sub" id="stat-last-feed"></div>
+      </div>
+    </section>
+
+    <!-- Section: History -->
+    <section class="section">
+      <h2 class="section-title">History</h2>
+      <div id="history-loading" class="loading hidden">Loading...</div>
+      <div id="history-list"></div>
+      <button id="btn-load-more" class="btn-load-more hidden">Load more</button>
+      <div id="history-empty" class="empty-state hidden">No entries yet</div>
+    </section>
+
+  </main>
+
+  <!-- Config Modal -->
+  <div id="config-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Airtable Settings</h2>
+      <p class="modal-help">To set up Airtable:</p>
+      <ol class="modal-help-list">
+        <li>Create a base at <strong>airtable.com</strong></li>
+        <li>Add a table named <strong>BabyLog</strong> with fields: Type (single select), Timestamp (date time), Side (single select), StartTime (date time), Duration (number), Temperature (number)</li>
+        <li>Create a token at <strong>airtable.com/create/tokens</strong> with data.records:read and data.records:write scopes</li>
+        <li>Copy your Base ID from the URL (starts with <strong>app</strong>)</li>
+      </ol>
+      <label for="input-token">API Token</label>
+      <input type="password" id="input-token" placeholder="pat...">
+      <label for="input-base-id">Base ID</label>
+      <input type="text" id="input-base-id" placeholder="appXXXXXXXXXXXXXX">
+      <label for="input-table-name">Table Name</label>
+      <input type="text" id="input-table-name" placeholder="BabyLog" value="BabyLog">
+      <div class="modal-actions">
+        <button id="btn-config-cancel" class="btn-secondary">Cancel</button>
+        <button id="btn-config-save" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
