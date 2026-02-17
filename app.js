@@ -174,6 +174,61 @@
   let isPaused = false;
   let pausedElapsed = 0; // seconds accumulated before current resume
 
+  // ── Timer Persistence ──────────────────────────────────────
+
+  function saveTimerState() {
+    const state = {
+      selectedSide: selectedSide,
+      timerStartTime: timerStartTime ? timerStartTime.toISOString() : null,
+      isPaused: isPaused,
+      pausedElapsed: pausedElapsed,
+    };
+    localStorage.setItem('bt_timer_state', JSON.stringify(state));
+  }
+
+  function clearTimerState() {
+    localStorage.removeItem('bt_timer_state');
+  }
+
+  function restoreTimer() {
+    const raw = localStorage.getItem('bt_timer_state');
+    if (!raw) return;
+    let state;
+    try { state = JSON.parse(raw); } catch (e) { clearTimerState(); return; }
+    if (!state || !state.selectedSide) { clearTimerState(); return; }
+
+    // Restore variables
+    selectedSide = state.selectedSide;
+    isPaused = state.isPaused;
+    pausedElapsed = state.pausedElapsed || 0;
+
+    if (!isPaused && state.timerStartTime) {
+      timerStartTime = new Date(state.timerStartTime);
+    }
+
+    // Restore UI: show feeding panel with timer
+    document.getElementById('panel-feeding').classList.remove('hidden');
+    document.querySelector('.side-buttons').classList.add('hidden');
+    document.querySelector('.panel-instruction').classList.add('hidden');
+    document.getElementById('timer-section').classList.remove('hidden');
+
+    const label = selectedSide.charAt(0).toUpperCase() + selectedSide.slice(1);
+    document.getElementById('timer-side-label').textContent = `${label} side`;
+
+    const pauseBtn = document.getElementById('btn-pause-timer');
+    if (isPaused) {
+      pauseBtn.textContent = 'Resume';
+      pauseBtn.classList.add('paused');
+    } else {
+      pauseBtn.textContent = 'Pause';
+      pauseBtn.classList.remove('paused');
+      // Restart the interval
+      timerInterval = setInterval(updateTimerDisplay, 1000);
+    }
+
+    updateTimerDisplay();
+  }
+
   function initLogView() {
     document.getElementById('card-pee').addEventListener('click', logPee);
     document.getElementById('card-poop').addEventListener('click', logPoop);
@@ -214,6 +269,7 @@
     selectedSide = null;
     isPaused = false;
     pausedElapsed = 0;
+    clearTimerState();
     document.getElementById('panel-feeding').classList.add('hidden');
   }
 
@@ -258,6 +314,7 @@
 
     timerInterval = setInterval(updateTimerDisplay, 1000);
     updateTimerDisplay();
+    saveTimerState();
   }
 
   function togglePause() {
@@ -270,6 +327,7 @@
       timerInterval = null;
       pauseBtn.textContent = 'Resume';
       pauseBtn.classList.add('paused');
+      saveTimerState();
     } else {
       // Resume: reset timerStartTime to now (elapsed is already saved in pausedElapsed)
       isPaused = false;
@@ -277,6 +335,7 @@
       timerInterval = setInterval(updateTimerDisplay, 1000);
       pauseBtn.textContent = 'Pause';
       pauseBtn.classList.remove('paused');
+      saveTimerState();
     }
   }
 
@@ -638,6 +697,7 @@
     initConfigModal();
     initHistoryLoadMore();
     registerServiceWorker();
+    restoreTimer();
 
     if (!isConfigured()) {
       showConfigModal();
