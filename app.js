@@ -77,6 +77,14 @@
     });
   }
 
+  async function deleteRecord(recordId) {
+    if (!isConfigured()) { showConfigModal(); return null; }
+    return apiRequest(`${apiUrl()}/${recordId}`, {
+      method: 'DELETE',
+      headers: apiHeaders(),
+    });
+  }
+
   async function fetchRecords(opts = {}) {
     if (!isConfigured()) { showConfigModal(); return null; }
     const params = new URLSearchParams();
@@ -590,13 +598,36 @@
 
     const time = document.createElement('div');
     time.className = 'event-time';
-    const ts = new Date(f.Timestamp);
+    const ts = f.Type === 'feeding' && f.StartTime
+      ? new Date(f.StartTime)
+      : new Date(f.Timestamp);
     time.textContent = ts.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 
     info.appendChild(desc);
     info.appendChild(time);
     row.appendChild(icon);
     row.appendChild(info);
+
+    // Delete button
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'event-delete';
+    deleteBtn.innerHTML = '&#x1F5D1;&#xFE0F;';
+    deleteBtn.setAttribute('aria-label', 'Delete entry');
+    deleteBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('Delete this entry?')) return;
+      try {
+        await deleteRecord(record.id);
+        historyRecords = historyRecords.filter(r => r.id !== record.id);
+        renderHistoryList();
+        refreshTodayView();
+        showToast('Entry deleted', 'success');
+      } catch (err) {
+        // error already shown by apiRequest
+      }
+    });
+    row.appendChild(deleteBtn);
+
     return row;
   }
 
@@ -674,6 +705,60 @@
     document.getElementById('btn-config-save').addEventListener('click', handleConfigSave);
   }
 
+  // ── Daily Vitamins ─────────────────────────────────────────
+
+  function getTodayDateStr() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }
+
+  function loadVitaminState() {
+    const raw = localStorage.getItem('bt_vitamins');
+    if (!raw) return { date: null, vitaminD: false, vitaminK: false };
+    try { return JSON.parse(raw); } catch (e) { return { date: null, vitaminD: false, vitaminK: false }; }
+  }
+
+  function saveVitaminState(vitaminD, vitaminK) {
+    localStorage.setItem('bt_vitamins', JSON.stringify({
+      date: getTodayDateStr(),
+      vitaminD: vitaminD,
+      vitaminK: vitaminK,
+    }));
+  }
+
+  function updateVitaminUI(checkD, checkK) {
+    const labelD = document.getElementById('label-vitamin-d');
+    const labelK = document.getElementById('label-vitamin-k');
+    labelD.classList.toggle('checked', checkD.checked);
+    labelK.classList.toggle('checked', checkK.checked);
+  }
+
+  function initVitamins() {
+    const checkD = document.getElementById('check-vitamin-d');
+    const checkK = document.getElementById('check-vitamin-k');
+    const state = loadVitaminState();
+
+    // Reset if different day
+    if (state.date === getTodayDateStr()) {
+      checkD.checked = state.vitaminD;
+      checkK.checked = state.vitaminK;
+    } else {
+      checkD.checked = false;
+      checkK.checked = false;
+    }
+
+    updateVitaminUI(checkD, checkK);
+
+    checkD.addEventListener('change', () => {
+      updateVitaminUI(checkD, checkK);
+      saveVitaminState(checkD.checked, checkK.checked);
+    });
+    checkK.addEventListener('change', () => {
+      updateVitaminUI(checkD, checkK);
+      saveVitaminState(checkD.checked, checkK.checked);
+    });
+  }
+
   // ── Init ────────────────────────────────────────────────────
 
   function delay(ms) {
@@ -696,6 +781,7 @@
     initLogView();
     initConfigModal();
     initHistoryLoadMore();
+    initVitamins();
     registerServiceWorker();
     restoreTimer();
 
