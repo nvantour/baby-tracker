@@ -221,35 +221,69 @@ input {
 }
 
 .panel-instruction {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-secondary);
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+  text-align: center;
 }
 
-/* Side Buttons */
+/* Side Buttons — Apple-inspired */
 .side-buttons {
   display: flex;
-  gap: 12px;
+  gap: 14px;
   margin-bottom: 20px;
 }
 
 .side-btn {
   flex: 1;
-  height: 52px;
-  border-radius: var(--radius-sm);
-  font-size: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 88px;
+  border-radius: 16px;
+  font-size: 17px;
   font-weight: 600;
+  letter-spacing: -0.2px;
   background: var(--card-bg);
-  border: 2px solid var(--border);
-  transition: all 0.15s;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
   -webkit-tap-highlight-color: transparent;
+  color: var(--text);
 }
 
-.side-btn:active,
+.side-btn::before {
+  content: '';
+  display: block;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #e8e0f0, #d4c5e8);
+}
+
+.side-btn[data-side="left"]::before {
+  background: linear-gradient(135deg, #e0e8f0, #c5d4e8);
+}
+
+.side-btn[data-side="right"]::before {
+  background: linear-gradient(135deg, #e8e0f0, #d4c5e8);
+}
+
+.side-btn:active {
+  transform: scale(0.97);
+  box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.25);
+}
+
 .side-btn.selected {
   background: var(--accent);
   color: #fff;
-  border-color: var(--accent);
+  box-shadow: 0 4px 12px rgba(108, 92, 231, 0.3);
+}
+
+.side-btn.selected::before {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 /* Timer */
