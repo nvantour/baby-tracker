@@ -470,6 +470,10 @@
     let latestTempTime = null;
     let peeCount = 0;
     let poopCount = 0;
+    let vitaminD = false;
+    let vitaminDRecordId = null;
+    let vitaminK = false;
+    let vitaminKRecordId = null;
 
     records.forEach(r => {
       const f = r.fields;
@@ -493,6 +497,14 @@
         case 'poop':
           poopCount++;
           break;
+        case 'vitamin_d':
+          vitaminD = true;
+          vitaminDRecordId = r.id;
+          break;
+        case 'vitamin_k':
+          vitaminK = true;
+          vitaminKRecordId = r.id;
+          break;
       }
     });
 
@@ -504,6 +516,10 @@
       latestTemp,
       peeCount,
       poopCount,
+      vitaminD,
+      vitaminDRecordId,
+      vitaminK,
+      vitaminKRecordId,
     };
   }
 
@@ -529,6 +545,9 @@
 
     document.getElementById('stat-pee').textContent = s.peeCount;
     document.getElementById('stat-poop').textContent = s.poopCount;
+
+    // Sync vitamin checkboxes with Airtable data
+    syncVitaminCheckboxes(s);
   }
 
   function formatTimeSince(date) {
@@ -632,7 +651,7 @@
 
     const icon = document.createElement('div');
     icon.className = 'event-icon';
-    const icons = { feeding: '\u{1F37C}', temperature: '\u{1F321}', pee: '\u{1F4A7}', poop: '\u{1F4A9}' };
+    const icons = { feeding: '\u{1F37C}', temperature: '\u{1F321}', pee: '\u{1F4A7}', poop: '\u{1F4A9}', vitamin_d: '\u2600\uFE0F', vitamin_k: '\u{1F48A}' };
     icon.textContent = icons[f.Type] || '';
 
     const info = document.createElement('div');
@@ -692,6 +711,10 @@
         return 'Pee diaper';
       case 'poop':
         return 'Poop diaper';
+      case 'vitamin_d':
+        return 'Vitamin D given';
+      case 'vitamin_k':
+        return 'Vitamin K given';
       default:
         return fields.Type || 'Unknown';
     }
@@ -751,25 +774,22 @@
     document.getElementById('btn-config-save').addEventListener('click', handleConfigSave);
   }
 
-  // ── Daily Vitamins ─────────────────────────────────────────
+  // ── Daily Vitamins (synced via Airtable) ───────────────────
 
-  function getTodayDateStr() {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  }
+  let vitaminDRecordId = null;
+  let vitaminKRecordId = null;
+  let vitaminBusy = false; // prevent double-tap
 
-  function loadVitaminState() {
-    const raw = localStorage.getItem('bt_vitamins');
-    if (!raw) return { date: null, vitaminD: false, vitaminK: false };
-    try { return JSON.parse(raw); } catch (e) { return { date: null, vitaminD: false, vitaminK: false }; }
-  }
+  function syncVitaminCheckboxes(summary) {
+    const checkD = document.getElementById('check-vitamin-d');
+    const checkK = document.getElementById('check-vitamin-k');
 
-  function saveVitaminState(vitaminD, vitaminK) {
-    localStorage.setItem('bt_vitamins', JSON.stringify({
-      date: getTodayDateStr(),
-      vitaminD: vitaminD,
-      vitaminK: vitaminK,
-    }));
+    checkD.checked = summary.vitaminD;
+    checkK.checked = summary.vitaminK;
+    vitaminDRecordId = summary.vitaminDRecordId;
+    vitaminKRecordId = summary.vitaminKRecordId;
+
+    updateVitaminUI(checkD, checkK);
   }
 
   function updateVitaminUI(checkD, checkK) {
@@ -779,30 +799,52 @@
     labelK.classList.toggle('checked', checkK.checked);
   }
 
+  async function handleVitaminToggle(type, checkbox) {
+    if (vitaminBusy) { checkbox.checked = !checkbox.checked; return; }
+    vitaminBusy = true;
+
+    const checkD = document.getElementById('check-vitamin-d');
+    const checkK = document.getElementById('check-vitamin-k');
+
+    try {
+      if (checkbox.checked) {
+        // Create record in Airtable
+        const result = await createRecord({
+          Type: type,
+          Timestamp: new Date().toISOString(),
+        });
+        if (result && result.records && result.records[0]) {
+          if (type === 'vitamin_d') vitaminDRecordId = result.records[0].id;
+          if (type === 'vitamin_k') vitaminKRecordId = result.records[0].id;
+          showToast(type === 'vitamin_d' ? 'Vitamin D logged' : 'Vitamin K logged', 'success');
+        }
+      } else {
+        // Delete record from Airtable
+        const recordId = type === 'vitamin_d' ? vitaminDRecordId : vitaminKRecordId;
+        if (recordId) {
+          await deleteRecord(recordId);
+          if (type === 'vitamin_d') vitaminDRecordId = null;
+          if (type === 'vitamin_k') vitaminKRecordId = null;
+          showToast(type === 'vitamin_d' ? 'Vitamin D removed' : 'Vitamin K removed', 'success');
+        }
+      }
+      updateVitaminUI(checkD, checkK);
+      refreshAll();
+    } catch (err) {
+      // Revert checkbox on error
+      checkbox.checked = !checkbox.checked;
+      updateVitaminUI(checkD, checkK);
+    } finally {
+      vitaminBusy = false;
+    }
+  }
+
   function initVitamins() {
     const checkD = document.getElementById('check-vitamin-d');
     const checkK = document.getElementById('check-vitamin-k');
-    const state = loadVitaminState();
 
-    // Reset if different day
-    if (state.date === getTodayDateStr()) {
-      checkD.checked = state.vitaminD;
-      checkK.checked = state.vitaminK;
-    } else {
-      checkD.checked = false;
-      checkK.checked = false;
-    }
-
-    updateVitaminUI(checkD, checkK);
-
-    checkD.addEventListener('change', () => {
-      updateVitaminUI(checkD, checkK);
-      saveVitaminState(checkD.checked, checkK.checked);
-    });
-    checkK.addEventListener('change', () => {
-      updateVitaminUI(checkD, checkK);
-      saveVitaminState(checkD.checked, checkK.checked);
-    });
+    checkD.addEventListener('change', () => handleVitaminToggle('vitamin_d', checkD));
+    checkK.addEventListener('change', () => handleVitaminToggle('vitamin_k', checkK));
   }
 
   // ── Init ────────────────────────────────────────────────────
