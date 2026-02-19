@@ -124,7 +124,14 @@
 
   // ── Event Logging ───────────────────────────────────────────
 
+  function flashCard(id) {
+    const card = document.getElementById(id);
+    card.classList.add('tapped');
+    setTimeout(() => card.classList.remove('tapped'), 300);
+  }
+
   async function logPee() {
+    flashCard('card-pee');
     const result = await createRecord({
       Type: 'pee',
       Timestamp: new Date().toISOString(),
@@ -133,6 +140,7 @@
   }
 
   async function logPoop() {
+    flashCard('card-poop');
     const result = await createRecord({
       Type: 'poop',
       Timestamp: new Date().toISOString(),
@@ -268,6 +276,7 @@
   }
 
   function showFeedingPanel() {
+    flashCard('card-feeding');
     closeTemperaturePanel();
     resetFeedingPanel();
     document.getElementById('panel-feeding').classList.remove('hidden');
@@ -420,6 +429,7 @@
   let tempValue = 37.0;
 
   function showTemperaturePanel() {
+    flashCard('card-temperature');
     closeFeedingPanel();
     tempValue = 37.0;
     document.getElementById('temp-value').textContent = tempValue.toFixed(1);

@@ -152,6 +152,15 @@ input {
   background: #eef0f2;
 }
 
+.log-card.tapped {
+  background: var(--accent);
+  transform: scale(0.96);
+}
+
+.log-card.tapped .log-label {
+  color: #fff;
+}
+
 .log-icon {
   font-size: 32px;
   line-height: 1;
