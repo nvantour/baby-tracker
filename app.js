@@ -181,6 +181,8 @@
   let selectedSide = null;
   let isPaused = false;
   let pausedElapsed = 0; // seconds accumulated before current resume
+  let restInterval = null;
+  let restRemaining = 0;
 
   // ── Timer Persistence ──────────────────────────────────────
 
@@ -253,6 +255,7 @@
     // Pause and stop timer
     document.getElementById('btn-pause-timer').addEventListener('click', togglePause);
     document.getElementById('btn-stop-timer').addEventListener('click', stopTimer);
+    document.getElementById('btn-skip-rest').addEventListener('click', skipRest);
 
     // Temperature stepper
     document.getElementById('temp-minus').addEventListener('click', () => adjustTemp(-0.1));
@@ -277,7 +280,11 @@
     selectedSide = null;
     isPaused = false;
     pausedElapsed = 0;
+    clearInterval(restInterval);
+    restInterval = null;
+    restRemaining = 0;
     clearTimerState();
+    document.getElementById('rest-section').classList.add('hidden');
     document.getElementById('panel-feeding').classList.add('hidden');
   }
 
@@ -288,7 +295,11 @@
     selectedSide = null;
     isPaused = false;
     pausedElapsed = 0;
+    clearInterval(restInterval);
+    restInterval = null;
+    restRemaining = 0;
     document.getElementById('timer-section').classList.add('hidden');
+    document.getElementById('rest-section').classList.add('hidden');
     document.getElementById('timer-display').textContent = '00:00';
     document.getElementById('timer-side-label').textContent = '';
     const pauseBtn = document.getElementById('btn-pause-timer');
@@ -368,6 +379,41 @@
     const durationSecs = getTotalElapsedSecs();
     const feedStartTime = new Date(Date.now() - durationSecs * 1000);
     logFeeding(selectedSide, feedStartTime, durationSecs);
+    clearTimerState();
+
+    // Hide timer, show rest countdown
+    document.getElementById('timer-section').classList.add('hidden');
+    startRestCountdown();
+  }
+
+  function startRestCountdown() {
+    restRemaining = 180;
+    const restDisplay = document.getElementById('rest-display');
+    const restSection = document.getElementById('rest-section');
+    restSection.classList.remove('hidden');
+    updateRestDisplay();
+
+    restInterval = setInterval(() => {
+      restRemaining--;
+      updateRestDisplay();
+      if (restRemaining <= 0) {
+        clearInterval(restInterval);
+        restInterval = null;
+        showToast('Rest time is over!', 'success');
+        closeFeedingPanel();
+      }
+    }, 1000);
+  }
+
+  function updateRestDisplay() {
+    const mins = String(Math.floor(restRemaining / 60)).padStart(2, '0');
+    const secs = String(restRemaining % 60).padStart(2, '0');
+    document.getElementById('rest-display').textContent = `${mins}:${secs}`;
+  }
+
+  function skipRest() {
+    clearInterval(restInterval);
+    restInterval = null;
     closeFeedingPanel();
   }
 

@@ -306,6 +306,21 @@ input {
   background: #c82333;
 }
 
+/* Rest Countdown */
+.rest-label {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.btn-skip {
+  width: 100%;
+  height: 48px;
+  margin-top: 16px;
+}
+
 /* Stepper */
 .stepper {
   display: flex;
