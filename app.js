@@ -44,13 +44,17 @@
   }
 
   async function apiRequest(url, options, retries = 0) {
+    console.log('API request:', options.method, url);
+    if (options.body) console.log('API body:', options.body);
     let res;
     try {
       res = await fetch(url, options);
     } catch (err) {
+      console.error('API fetch error:', err);
       showToast('Connection error. Check your internet.', 'error');
       throw err;
     }
+    console.log('API response status:', res.status);
     if (res.status === 429 && retries < 2) {
       await delay(30000);
       return apiRequest(url, options, retries + 1);
@@ -61,7 +65,7 @@
     }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      console.error('Airtable API error:', res.status, body);
+      console.error('Airtable API error:', res.status, JSON.stringify(body));
       const msg = body?.error?.message || `Error ${res.status}`;
       showToast(msg, 'error');
       throw new Error(msg);
@@ -106,9 +110,9 @@
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const endOfDay = new Date(startOfDay.getTime() + 86400000);
-    const startStr = startOfDay.toISOString().replace(/\.\d{3}Z$/, '.000Z');
-    const endStr = endOfDay.toISOString().replace(/\.\d{3}Z$/, '.000Z');
-    const formula = `AND(IS_AFTER({Timestamp}, '${startStr}'), IS_BEFORE({Timestamp}, '${endStr}'))`;
+    const startStr = startOfDay.toISOString();
+    const endStr = endOfDay.toISOString();
+    const formula = `AND({Timestamp} >= '${startStr}', {Timestamp} < '${endStr}')`;
     const allRecords = [];
     let offset = null;
     do {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'baby-tracker-v10';
+const CACHE_NAME = 'baby-tracker-v11';
 const ASSETS = [
   'index.html',
   'styles.css',
