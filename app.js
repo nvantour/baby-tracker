@@ -44,17 +44,13 @@
   }
 
   async function apiRequest(url, options, retries = 0) {
-    console.log('API request:', options.method, url);
-    if (options.body) console.log('API body:', options.body);
     let res;
     try {
       res = await fetch(url, options);
     } catch (err) {
-      console.error('API fetch error:', err);
       showToast('Connection error. Check your internet.', 'error');
       throw err;
     }
-    console.log('API response status:', res.status);
     if (res.status === 429 && retries < 2) {
       await delay(30000);
       return apiRequest(url, options, retries + 1);
@@ -65,7 +61,6 @@
     }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      console.error('Airtable API error:', res.status, JSON.stringify(body));
       const msg = body?.error?.message || `Error ${res.status}`;
       showToast(msg, 'error');
       throw new Error(msg);
