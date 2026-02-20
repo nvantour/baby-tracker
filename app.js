@@ -61,6 +61,7 @@
     }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
+      console.error('Airtable API error:', res.status, body);
       const msg = body?.error?.message || `Error ${res.status}`;
       showToast(msg, 'error');
       throw new Error(msg);
@@ -105,7 +106,9 @@
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const endOfDay = new Date(startOfDay.getTime() + 86400000);
-    const formula = `AND({Timestamp} >= '${startOfDay.toISOString()}', {Timestamp} < '${endOfDay.toISOString()}')`;
+    const startStr = startOfDay.toISOString().replace(/\.\d{3}Z$/, '.000Z');
+    const endStr = endOfDay.toISOString().replace(/\.\d{3}Z$/, '.000Z');
+    const formula = `AND(IS_AFTER({Timestamp}, '${startStr}'), IS_BEFORE({Timestamp}, '${endStr}'))`;
     const allRecords = [];
     let offset = null;
     do {
