@@ -1,4 +1,4 @@
-const CACHE_NAME = 'baby-tracker-v15';
+const CACHE_NAME = 'baby-tracker-v16';
 const ASSETS = [
   'index.html',
   'styles.css',
@@ -25,12 +25,31 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  if (event.request.url.includes('api.airtable.com')) {
-    event.respondWith(fetch(event.request));
-  } else {
-    event.respondWith(
-      caches.match(event.request).then(cached => cached || fetch(event.request))
-    );
-  }
-});
+  const url = new URL(event.request.url);
 
+  // Airtable API: always network
+  if (url.hostname.includes('api.airtable.com')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
+  // App shell (HTML/JS/CSS): network-first, cache fallback for offline
+  const isAppShell = /\.(html|js|css)$/.test(url.pathname) || url.pathname.endsWith('/');
+  if (isAppShell) {
+    event.respondWith(
+      fetch(event.request)
+        .then(res => {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then(c => c.put(event.request, clone));
+          return res;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Other assets (icons, manifest): cache-first
+  event.respondWith(
+    caches.match(event.request).then(cached => cached || fetch(event.request))
+  );
+});
