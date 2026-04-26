@@ -1,8 +1,61 @@
 (function () {
   'use strict';
 
-  // ── Config ──────────────────────────────────────────────────
+  // ── Rate Limiter ──────────────────────────────────────────
+  const RATE_LIMIT = 5;
+  const RATE_WINDOW_MS = 1000;
+  const requestTimestamps = [];
 
+  async function rateLimitedFetch(url, options) {
+    while (true) {
+      const now = Date.now();
+      while (requestTimestamps.length > 0 && requestTimestamps[0] <= now - RATE_WINDOW_MS) {
+        requestTimestamps.shift();
+      }
+      if (requestTimestamps.length < RATE_LIMIT) {
+        requestTimestamps.push(now);
+        return fetch(url, options);
+      }
+      const waitMs = requestTimestamps[0] + RATE_WINDOW_MS - now + 10;
+      await new Promise(r => setTimeout(r, waitMs));
+    }
+  }
+
+  // ── Day Boundary (07:00) ──────────────────────────────────
+  const DAY_START_HOUR = 7;
+
+  function getDayBoundary() {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), DAY_START_HOUR, 0, 0);
+    if (now.getHours() < DAY_START_HOUR) start.setDate(start.getDate() - 1);
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    return { start, end };
+  }
+
+  function getDayKey() {
+    const { start } = getDayBoundary();
+    return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+  }
+
+  // ── Today Records Cache ───────────────────────────────────
+  let todayRecordsCache = null;
+  let todayCacheKey = null;
+
+  function isCacheValid() {
+    return todayRecordsCache !== null && todayCacheKey === getDayKey();
+  }
+
+  function addToCache(record) {
+    if (!isCacheValid()) return;
+    todayRecordsCache.unshift(record);
+  }
+
+  function removeFromCache(recordId) {
+    if (!isCacheValid()) return;
+    todayRecordsCache = todayRecordsCache.filter(r => r.id !== recordId);
+  }
+
+  // ── Config ────────────────────────────────────────────────
   const STORAGE = {
     TOKEN: 'bt_airtable_token',
     BASE_ID: 'bt_airtable_base_id',
@@ -28,8 +81,7 @@
     return c.token.length > 0 && c.baseId.length > 0;
   }
 
-  // ── Airtable API Layer ──────────────────────────────────────
-
+  // ── Airtable API Layer ────────────────────────────────────
   function apiUrl() {
     const c = getConfig();
     return `https://api.airtable.com/v0/${c.baseId.trim()}/${encodeURIComponent(c.tableName.trim())}`;
@@ -46,22 +98,22 @@
   async function apiRequest(url, options, retries = 0) {
     let res;
     try {
-      res = await fetch(url, options);
+      res = await rateLimitedFetch(url, options);
     } catch (err) {
-      showToast('Connection error. Check your internet.', 'error');
+      showToast('Verbindingsfout. Check je internet.', 'error');
       throw err;
     }
     if (res.status === 429 && retries < 2) {
-      await delay(30000);
+      await new Promise(r => setTimeout(r, 30000));
       return apiRequest(url, options, retries + 1);
     }
     if (res.status === 401) {
-      showToast('Invalid API token. Check settings.', 'error');
+      showToast('Ongeldige API token. Check instellingen.', 'error');
       throw new Error('Unauthorized');
     }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      const msg = body?.error?.message || `Error ${res.status}`;
+      const msg = body?.error?.message || `Fout ${res.status}`;
       showToast(msg, 'error');
       throw new Error(msg);
     }
@@ -97,483 +149,571 @@
         params.set(`sort[${i}][direction]`, s.direction);
       });
     }
-    const url = `${apiUrl()}?${params.toString()}`;
-    return apiRequest(url, { method: 'GET', headers: apiHeaders() });
+    return apiRequest(`${apiUrl()}?${params.toString()}`, { method: 'GET', headers: apiHeaders() });
   }
 
-  async function fetchTodayRecords() {
-    const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const endOfDay = new Date(startOfDay.getTime() + 86400000);
-    const startStr = startOfDay.toISOString();
-    const endStr = endOfDay.toISOString();
-    const formula = `AND({Timestamp} >= '${startStr}', {Timestamp} < '${endStr}')`;
-    const allRecords = [];
+  async function fetchTodayRecords(forceRefresh = false) {
+    if (!forceRefresh && isCacheValid()) return todayRecordsCache;
+
+    const { start, end } = getDayBoundary();
+    const formula = `AND({Timestamp} >= '${start.toISOString()}', {Timestamp} < '${end.toISOString()}')`;
+    const all = [];
     let offset = null;
     do {
       const data = await fetchRecords({
         filterFormula: formula,
         sort: [{ field: 'Timestamp', direction: 'desc' }],
         pageSize: 100,
-        offset: offset,
+        offset,
       });
       if (!data) return [];
-      allRecords.push(...data.records);
+      all.push(...data.records);
       offset = data.offset || null;
     } while (offset);
-    return allRecords;
+
+    todayRecordsCache = all;
+    todayCacheKey = getDayKey();
+    return all;
   }
 
-  // ── Event Logging ───────────────────────────────────────────
-
-  function flashCard(id) {
-    const card = document.getElementById(id);
-    card.classList.add('tapped');
-    setTimeout(() => card.classList.remove('tapped'), 300);
+  // ── Time helpers ──────────────────────────────────────────
+  function getCurrentTimeStr() {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   }
 
-  async function logPee() {
-    flashCard('card-pee');
+  function timeStrToISO(timeStr) {
+    const now = new Date();
+    const [h, m] = timeStr.split(':').map(Number);
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0);
+    // If user enters a time that's in the future (more than 5 min ahead), assume it's from yesterday
+    if (d.getTime() > now.getTime() + 5 * 60000) {
+      d.setDate(d.getDate() - 1);
+    }
+    return d.toISOString();
+  }
+
+  function formatTime(date) {
+    return date.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function formatDuration(totalMinutes) {
+    const m = Math.round(totalMinutes);
+    if (m < 60) return `${m} min`;
+    const h = Math.floor(m / 60);
+    const rem = m % 60;
+    return rem > 0 ? `${h}u ${rem}m` : `${h}u`;
+  }
+
+  // ── Event Logging ─────────────────────────────────────────
+  async function logSleepStart(timeStr) {
     const result = await createRecord({
-      Type: 'pee',
-      Timestamp: new Date().toISOString(),
-    });
-    if (result) { showToast('Pee diaper logged', 'success'); refreshAll(); }
-  }
-
-  async function logPoop() {
-    flashCard('card-poop');
-    const result = await createRecord({
-      Type: 'poop',
-      Timestamp: new Date().toISOString(),
-    });
-    if (result) { showToast('Poop diaper logged', 'success'); refreshAll(); }
-  }
-
-  async function logFeeding(side, startTime, durationSecs) {
-    const durationMin = Math.round(durationSecs / 60);
-    const result = await createRecord({
-      Type: 'feeding',
-      Timestamp: new Date().toISOString(),
-      Side: side,
-      StartTime: startTime.toISOString(),
-      Duration: durationSecs,
+      Type: 'sleep_start',
+      Timestamp: timeStrToISO(timeStr),
     });
     if (result) {
-      const label = side.charAt(0).toUpperCase() + side.slice(1);
-      showToast(`Feeding logged (${label}, ${durationMin} min)`, 'success');
-      refreshAll();
+      showToast('Slaaptijd gelogd', 'success');
+      optimisticRefresh(result.records[0]);
+      resetTimeInputs();
     }
   }
 
-  async function logTemperature(temp) {
+  async function logWake(timeStr) {
     const result = await createRecord({
-      Type: 'temperature',
-      Timestamp: new Date().toISOString(),
-      Temperature: temp,
+      Type: 'wake',
+      Timestamp: timeStrToISO(timeStr),
     });
-    if (result) { showToast(`Temperature logged (${temp.toFixed(1)} \u00B0C)`, 'success'); refreshAll(); }
+    if (result) {
+      showToast('Wakker gelogd', 'success');
+      optimisticRefresh(result.records[0]);
+      resetTimeInputs();
+    }
   }
 
-  // ── Refresh All Sections ─────────────────────────────────────
+  async function logCry(durationMin) {
+    const result = await createRecord({
+      Type: 'cry',
+      Timestamp: new Date().toISOString(),
+      Duration: durationMin,
+    });
+    if (result) {
+      showToast(`Huilen gelogd (${durationMin} min)`, 'success');
+      optimisticRefresh(result.records[0]);
+    }
+  }
+
+  async function logFeedingOffered(success, startTimeStr, durationMin) {
+    const fields = {
+      Type: 'feeding_offered',
+      Timestamp: new Date().toISOString(),
+      FeedingSuccess: success ? 'Succes!' : 'Ze wilde niet',
+    };
+    if (success && startTimeStr) {
+      fields.StartTime = timeStrToISO(startTimeStr);
+      fields.Duration = durationMin;
+    }
+    const result = await createRecord(fields);
+    if (result) {
+      const msg = success
+        ? `Borstvoeding gelogd (gelukt, ${durationMin} min)`
+        : 'Borstvoeding aangeboden (niet gelukt)';
+      showToast(msg, 'success');
+      optimisticRefresh(result.records[0]);
+    }
+  }
+
+  // ── Optimistic Updates ────────────────────────────────────
+  function optimisticRefresh(newRecord) {
+    addToCache(newRecord);
+    historyRecords.unshift(newRecord);
+    rerenderFromCache();
+  }
+
+  function optimisticDelete(recordId) {
+    removeFromCache(recordId);
+    historyRecords = historyRecords.filter(r => r.id !== recordId);
+    rerenderFromCache();
+  }
+
+  function rerenderFromCache() {
+    if (isCacheValid() && activeTab === 'dashboard') {
+      const stats = computeDashboard(todayRecordsCache);
+      renderDashboard(stats);
+    }
+    renderHistoryList();
+  }
 
   async function refreshAll() {
     await Promise.all([
-      refreshTodayView(),
+      fetchTodayRecords(true).then(records => {
+        if (activeTab === 'dashboard') {
+          const stats = computeDashboard(records);
+          renderDashboard(stats);
+        }
+      }),
       refreshHistoryView(),
     ]);
   }
 
-  // ── Log View UI ─────────────────────────────────────────────
+  // ── Tab Navigation ────────────────────────────────────────
+  let activeTab = 'log';
 
-  let timerInterval = null;
-  let timerStartTime = null;
-  let selectedSide = null;
-  let isPaused = false;
-  let pausedElapsed = 0; // seconds accumulated before current resume
-  let restInterval = null;
-  let restRemaining = 0;
-
-  // ── Timer Persistence ──────────────────────────────────────
-
-  function saveTimerState() {
-    const state = {
-      selectedSide: selectedSide,
-      timerStartTime: timerStartTime ? timerStartTime.toISOString() : null,
-      isPaused: isPaused,
-      pausedElapsed: pausedElapsed,
-    };
-    localStorage.setItem('bt_timer_state', JSON.stringify(state));
+  function switchTab(tab) {
+    activeTab = tab;
+    document.getElementById('view-log').classList.toggle('hidden', tab !== 'log');
+    document.getElementById('view-dashboard').classList.toggle('hidden', tab !== 'dashboard');
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    if (tab === 'dashboard') refreshDashboard();
   }
 
-  function clearTimerState() {
-    localStorage.removeItem('bt_timer_state');
+  function initTabNav() {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
   }
 
-  function restoreTimer() {
-    const raw = localStorage.getItem('bt_timer_state');
-    if (!raw) return;
-    let state;
-    try { state = JSON.parse(raw); } catch (e) { clearTimerState(); return; }
-    if (!state || !state.selectedSide) { clearTimerState(); return; }
+  // ── Log View UI ───────────────────────────────────────────
+  let cryMinutes = 5;
+  let feedingMinutes = 10;
 
-    // Restore variables
-    selectedSide = state.selectedSide;
-    isPaused = state.isPaused;
-    pausedElapsed = state.pausedElapsed || 0;
-
-    if (!isPaused && state.timerStartTime) {
-      timerStartTime = new Date(state.timerStartTime);
-    }
-
-    // Restore UI: show feeding panel with timer
-    document.getElementById('panel-feeding').classList.remove('hidden');
-    document.querySelector('.side-buttons').classList.add('hidden');
-    document.querySelector('.panel-instruction').classList.add('hidden');
-    document.getElementById('timer-section').classList.remove('hidden');
-
-    const label = selectedSide.charAt(0).toUpperCase() + selectedSide.slice(1);
-    document.getElementById('timer-side-label').textContent = `${label} side`;
-
-    const pauseBtn = document.getElementById('btn-pause-timer');
-    if (isPaused) {
-      pauseBtn.textContent = 'Resume';
-      pauseBtn.classList.add('paused');
-    } else {
-      pauseBtn.textContent = 'Pause';
-      pauseBtn.classList.remove('paused');
-      // Restart the interval
-      timerInterval = setInterval(updateTimerDisplay, 1000);
-    }
-
-    updateTimerDisplay();
+  function resetTimeInputs() {
+    const t = getCurrentTimeStr();
+    document.getElementById('input-sleep-time').value = t;
+    document.getElementById('input-wake-time').value = t;
+    document.getElementById('input-feeding-start').value = t;
   }
 
   function initLogView() {
-    document.getElementById('card-pee').addEventListener('click', logPee);
-    document.getElementById('card-poop').addEventListener('click', logPoop);
-    document.getElementById('card-feeding').addEventListener('click', showFeedingPanel);
-    document.getElementById('card-temperature').addEventListener('click', showTemperaturePanel);
-    document.getElementById('close-feeding').addEventListener('click', closeFeedingPanel);
-    document.getElementById('close-temperature').addEventListener('click', closeTemperaturePanel);
+    resetTimeInputs();
 
-    // Side buttons
-    document.querySelectorAll('.side-btn').forEach(btn => {
-      btn.addEventListener('click', () => startTimer(btn.dataset.side));
+    // Slaap
+    document.getElementById('btn-sleep-now').addEventListener('click', () => {
+      logSleepStart(getCurrentTimeStr());
+    });
+    document.getElementById('btn-sleep-log').addEventListener('click', () => {
+      const t = document.getElementById('input-sleep-time').value;
+      if (!t) return showToast('Vul een tijd in', 'error');
+      logSleepStart(t);
     });
 
-    // Pause and stop timer
-    document.getElementById('btn-pause-timer').addEventListener('click', togglePause);
-    document.getElementById('btn-stop-timer').addEventListener('click', stopTimer);
-    document.getElementById('btn-skip-rest').addEventListener('click', skipRest);
+    document.getElementById('btn-wake-now').addEventListener('click', () => {
+      logWake(getCurrentTimeStr());
+    });
+    document.getElementById('btn-wake-log').addEventListener('click', () => {
+      const t = document.getElementById('input-wake-time').value;
+      if (!t) return showToast('Vul een tijd in', 'error');
+      logWake(t);
+    });
 
-    // Temperature stepper
-    document.getElementById('temp-minus').addEventListener('click', () => adjustTemp(-0.1));
-    document.getElementById('temp-plus').addEventListener('click', () => adjustTemp(0.1));
-    document.getElementById('btn-log-temp').addEventListener('click', () => {
-      const val = parseFloat(document.getElementById('temp-value').textContent);
-      logTemperature(val);
-      closeTemperaturePanel();
+    // Huilen
+    document.getElementById('cry-minus').addEventListener('click', () => {
+      cryMinutes = Math.max(1, cryMinutes - 1);
+      document.getElementById('cry-value').textContent = cryMinutes;
+    });
+    document.getElementById('cry-plus').addEventListener('click', () => {
+      cryMinutes = Math.min(180, cryMinutes + 1);
+      document.getElementById('cry-value').textContent = cryMinutes;
+    });
+    document.getElementById('btn-cry-log').addEventListener('click', () => {
+      logCry(cryMinutes);
+    });
+
+    // Borstvoeding
+    const successBtn = document.getElementById('btn-feeding-success');
+    const failedBtn = document.getElementById('btn-feeding-failed');
+    const successForm = document.getElementById('feeding-success-form');
+
+    successBtn.addEventListener('click', () => {
+      successBtn.classList.add('selected');
+      failedBtn.classList.remove('selected');
+      successForm.classList.remove('hidden');
+      document.getElementById('input-feeding-start').value = getCurrentTimeStr();
+    });
+
+    failedBtn.addEventListener('click', () => {
+      failedBtn.classList.add('selected');
+      successBtn.classList.remove('selected');
+      successForm.classList.add('hidden');
+      logFeedingOffered(false, null, null);
+      setTimeout(() => failedBtn.classList.remove('selected'), 600);
+    });
+
+    document.getElementById('feeding-minus').addEventListener('click', () => {
+      feedingMinutes = Math.max(1, feedingMinutes - 1);
+      document.getElementById('feeding-value').textContent = feedingMinutes;
+    });
+    document.getElementById('feeding-plus').addEventListener('click', () => {
+      feedingMinutes = Math.min(120, feedingMinutes + 1);
+      document.getElementById('feeding-value').textContent = feedingMinutes;
+    });
+    document.getElementById('btn-feeding-save').addEventListener('click', () => {
+      const startTime = document.getElementById('input-feeding-start').value;
+      if (!startTime) return showToast('Vul een starttijd in', 'error');
+      logFeedingOffered(true, startTime, feedingMinutes);
+      successBtn.classList.remove('selected');
+      successForm.classList.add('hidden');
     });
   }
 
-  function showFeedingPanel() {
-    flashCard('card-feeding');
-    closeTemperaturePanel();
-    resetFeedingPanel();
-    document.getElementById('panel-feeding').classList.remove('hidden');
-  }
+  // ── Dashboard ─────────────────────────────────────────────
+  let activeDashTab = 'overview';
+  let liveTimerInterval = null;
+  let lastDashStats = null;
 
-  function closeFeedingPanel() {
-    clearInterval(timerInterval);
-    timerInterval = null;
-    timerStartTime = null;
-    selectedSide = null;
-    isPaused = false;
-    pausedElapsed = 0;
-    clearInterval(restInterval);
-    restInterval = null;
-    restRemaining = 0;
-    clearTimerState();
-    document.getElementById('rest-section').classList.add('hidden');
-    document.getElementById('panel-feeding').classList.add('hidden');
-  }
-
-  function resetFeedingPanel() {
-    clearInterval(timerInterval);
-    timerInterval = null;
-    timerStartTime = null;
-    selectedSide = null;
-    isPaused = false;
-    pausedElapsed = 0;
-    clearInterval(restInterval);
-    restInterval = null;
-    restRemaining = 0;
-    document.getElementById('timer-section').classList.add('hidden');
-    document.getElementById('rest-section').classList.add('hidden');
-    document.getElementById('timer-display').textContent = '00:00';
-    document.getElementById('timer-side-label').textContent = '';
-    const pauseBtn = document.getElementById('btn-pause-timer');
-    pauseBtn.textContent = 'Pause';
-    pauseBtn.classList.remove('paused');
-    document.querySelectorAll('.side-btn').forEach(b => b.classList.remove('selected'));
-    const sideButtons = document.querySelector('.side-buttons');
-    const instruction = document.querySelector('.panel-instruction');
-    sideButtons.classList.remove('hidden');
-    instruction.classList.remove('hidden');
-  }
-
-  function startTimer(side) {
-    selectedSide = side;
-    timerStartTime = new Date();
-    isPaused = false;
-    pausedElapsed = 0;
-
-    // Highlight selected side
-    document.querySelectorAll('.side-btn').forEach(b => {
-      b.classList.toggle('selected', b.dataset.side === side);
+  function switchDashTab(tab) {
+    activeDashTab = tab;
+    document.querySelectorAll('.dash-view').forEach(v => v.classList.add('hidden'));
+    document.getElementById(`dash-${tab}`).classList.remove('hidden');
+    document.querySelectorAll('.dash-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.dash === tab);
     });
-
-    // Hide side buttons and instruction, show timer
-    document.querySelector('.side-buttons').classList.add('hidden');
-    document.querySelector('.panel-instruction').classList.add('hidden');
-    document.getElementById('timer-section').classList.remove('hidden');
-
-    const label = side.charAt(0).toUpperCase() + side.slice(1);
-    document.getElementById('timer-side-label').textContent = `${label} side`;
-
-    timerInterval = setInterval(updateTimerDisplay, 1000);
-    updateTimerDisplay();
-    saveTimerState();
   }
 
-  function togglePause() {
-    const pauseBtn = document.getElementById('btn-pause-timer');
-    if (!isPaused) {
-      // Pause: save elapsed time and stop the interval
-      isPaused = true;
-      pausedElapsed += Math.floor((Date.now() - timerStartTime.getTime()) / 1000);
-      clearInterval(timerInterval);
-      timerInterval = null;
-      pauseBtn.textContent = 'Resume';
-      pauseBtn.classList.add('paused');
-      saveTimerState();
-    } else {
-      // Resume: reset timerStartTime to now (elapsed is already saved in pausedElapsed)
-      isPaused = false;
-      timerStartTime = new Date();
-      timerInterval = setInterval(updateTimerDisplay, 1000);
-      pauseBtn.textContent = 'Pause';
-      pauseBtn.classList.remove('paused');
-      saveTimerState();
-    }
+  function initDashboard() {
+    document.querySelectorAll('.dash-tab').forEach(btn => {
+      btn.addEventListener('click', () => switchDashTab(btn.dataset.dash));
+    });
   }
 
-  function getTotalElapsedSecs() {
-    if (isPaused) {
-      return pausedElapsed;
-    }
-    return pausedElapsed + Math.floor((Date.now() - timerStartTime.getTime()) / 1000);
-  }
+  function pairSleepWakeEvents(records) {
+    const events = records
+      .filter(r => r.fields.Type === 'sleep_start' || r.fields.Type === 'wake')
+      .sort((a, b) => new Date(a.fields.Timestamp) - new Date(b.fields.Timestamp));
 
-  function updateTimerDisplay() {
-    const elapsed = getTotalElapsedSecs();
-    const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
-    const secs = String(elapsed % 60).padStart(2, '0');
-    document.getElementById('timer-display').textContent = `${mins}:${secs}`;
-  }
+    const sleepPeriods = [];
+    const wakePeriods = [];
+    let lastSleepStart = null;
+    let lastWake = null;
 
-  function stopTimer() {
-    if (!selectedSide) return;
-    clearInterval(timerInterval);
-    timerInterval = null;
-    const durationSecs = getTotalElapsedSecs();
-    const feedStartTime = new Date(Date.now() - durationSecs * 1000);
-    logFeeding(selectedSide, feedStartTime, durationSecs);
-    clearTimerState();
-
-    // Hide timer, show rest countdown
-    document.getElementById('timer-section').classList.add('hidden');
-    startRestCountdown();
-  }
-
-  function startRestCountdown() {
-    restRemaining = 180;
-    const restDisplay = document.getElementById('rest-display');
-    const restSection = document.getElementById('rest-section');
-    restSection.classList.remove('hidden');
-    updateRestDisplay();
-
-    restInterval = setInterval(() => {
-      restRemaining--;
-      updateRestDisplay();
-      if (restRemaining <= 0) {
-        clearInterval(restInterval);
-        restInterval = null;
-        showToast('Rest time is over!', 'success');
-        closeFeedingPanel();
+    for (const event of events) {
+      const ts = new Date(event.fields.Timestamp);
+      if (event.fields.Type === 'sleep_start') {
+        if (lastWake !== null) {
+          wakePeriods.push({ start: lastWake, end: ts });
+          lastWake = null;
+        }
+        lastSleepStart = ts;
+      } else {
+        if (lastSleepStart !== null) {
+          sleepPeriods.push({ start: lastSleepStart, end: ts });
+          lastSleepStart = null;
+        }
+        lastWake = ts;
       }
-    }, 1000);
+    }
+    if (lastSleepStart !== null) sleepPeriods.push({ start: lastSleepStart, end: null });
+    if (lastWake !== null) wakePeriods.push({ start: lastWake, end: null });
+
+    return { sleepPeriods, wakePeriods };
   }
 
-  function updateRestDisplay() {
-    const mins = String(Math.floor(restRemaining / 60)).padStart(2, '0');
-    const secs = String(restRemaining % 60).padStart(2, '0');
-    document.getElementById('rest-display').textContent = `${mins}:${secs}`;
-  }
+  function computeDashboard(records) {
+    const { sleepPeriods, wakePeriods } = pairSleepWakeEvents(records);
+    const cries = records
+      .filter(r => r.fields.Type === 'cry')
+      .sort((a, b) => new Date(a.fields.Timestamp) - new Date(b.fields.Timestamp));
+    const feedings = records
+      .filter(r => r.fields.Type === 'feeding_offered')
+      .sort((a, b) => new Date(a.fields.Timestamp) - new Date(b.fields.Timestamp));
 
-  function skipRest() {
-    clearInterval(restInterval);
-    restInterval = null;
-    closeFeedingPanel();
-  }
+    const completeSleep = sleepPeriods.filter(p => p.end !== null);
+    const totalSleepMin = completeSleep.reduce((s, p) => s + (p.end - p.start) / 60000, 0);
+    const avgNapMin = completeSleep.length > 0 ? totalSleepMin / completeSleep.length : 0;
+    const currentlySleeping = sleepPeriods.find(p => p.end === null) || null;
+    const currentlyAwake = wakePeriods.find(p => p.end === null) || null;
 
-  let tempValue = 37.0;
+    const totalCryMin = cries.reduce((s, r) => s + (r.fields.Duration || 0), 0);
 
-  function showTemperaturePanel() {
-    flashCard('card-temperature');
-    closeFeedingPanel();
-    tempValue = 37.0;
-    document.getElementById('temp-value').textContent = tempValue.toFixed(1);
-    document.getElementById('panel-temperature').classList.remove('hidden');
-  }
+    const totalFeedingsOffered = feedings.length;
+    const successFeedings = feedings.filter(r => r.fields.FeedingSuccess === 'Succes!').length;
+    const failedFeedings = feedings.filter(r => r.fields.FeedingSuccess === 'Ze wilde niet').length;
+    const avgFeedingsPerWakePeriod = wakePeriods.length > 0
+      ? totalFeedingsOffered / wakePeriods.length
+      : 0;
 
-  function closeTemperaturePanel() {
-    document.getElementById('panel-temperature').classList.add('hidden');
-  }
-
-  function adjustTemp(delta) {
-    tempValue = Math.round((tempValue + delta) * 10) / 10;
-    tempValue = Math.max(34.0, Math.min(42.0, tempValue));
-    document.getElementById('temp-value').textContent = tempValue.toFixed(1);
-  }
-
-  // ── Today View ──────────────────────────────────────────────
-
-  async function refreshTodayView() {
-    const dateEl = document.getElementById('today-date');
-    const now = new Date();
-    dateEl.textContent = now.toLocaleDateString(undefined, {
-      weekday: 'long',
-      month: 'long',
-      day: 'numeric',
+    const feedingsPerWakePeriod = wakePeriods.map(wp => {
+      const inPeriod = feedings.filter(f => {
+        const ts = new Date(f.fields.Timestamp);
+        return ts >= wp.start && (wp.end === null ? true : ts < wp.end);
+      });
+      const successInPeriod = inPeriod.filter(f => f.fields.FeedingSuccess === 'Succes!');
+      const totalDurMin = successInPeriod.reduce((s, f) => s + (f.fields.Duration || 0), 0);
+      return {
+        wakePeriod: wp,
+        count: inPeriod.length,
+        successCount: successInPeriod.length,
+        totalDurMin,
+      };
     });
 
-    const loading = document.getElementById('today-loading');
-    loading.classList.remove('hidden');
+    return {
+      sleepPeriods, wakePeriods,
+      totalSleepMin, avgNapMin,
+      currentlySleeping, currentlyAwake,
+      cries, totalCryMin,
+      feedings, totalFeedingsOffered,
+      successFeedings, failedFeedings,
+      avgFeedingsPerWakePeriod, feedingsPerWakePeriod,
+    };
+  }
 
+  function getPeriodMinutes(period) {
+    const end = period.end || new Date();
+    return (end - period.start) / 60000;
+  }
+
+  function getDayLabel() {
+    const { start } = getDayBoundary();
+    return start.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+  }
+
+  function renderOverview(stats) {
+    const el = document.getElementById('dash-overview');
+    let html = `<div class="dash-date">📅 ${escapeHtml(getDayLabel())} (vanaf 07:00)</div>
+      <div class="overview-grid">
+        <div class="overview-card sleep-card">
+          <div class="overview-icon">💤</div>
+          <div class="overview-value">${escapeHtml(formatDuration(stats.totalSleepMin))}</div>
+          <div class="overview-label">slaap</div>
+        </div>
+        <div class="overview-card cry-card">
+          <div class="overview-icon">😢</div>
+          <div class="overview-value">${stats.totalCryMin} min</div>
+          <div class="overview-label">huiltijd</div>
+        </div>
+        <div class="overview-card wake-card">
+          <div class="overview-icon">⏱</div>
+          <div class="overview-value">${stats.wakePeriods.filter(p => p.end !== null).length}</div>
+          <div class="overview-label">wakkertijden</div>
+        </div>
+        <div class="overview-card feeding-card">
+          <div class="overview-icon">🤱</div>
+          <div class="overview-value">${stats.totalFeedingsOffered}×</div>
+          <div class="overview-label">aangeboden</div>
+        </div>
+      </div>`;
+
+    if (stats.currentlySleeping) {
+      html += `<div class="live-status sleep-status">
+        <span class="live-dot"></span>
+        💤 Nu slapend: <strong id="live-sleep-time">${formatDuration(getPeriodMinutes(stats.currentlySleeping))}</strong>
+      </div>`;
+    }
+    if (stats.currentlyAwake) {
+      const dur = getPeriodMinutes(stats.currentlyAwake);
+      const warn = dur > 90;
+      html += `<div class="live-status ${warn ? 'wake-status-warn' : 'wake-status'}">
+        <span class="live-dot"></span>
+        ☀️ Nu wakker: <strong id="live-wake-time">${formatDuration(dur)}</strong>
+        ${warn ? '<span class="warn-badge">Lang wakker</span>' : ''}
+      </div>`;
+    }
+    el.innerHTML = html;
+  }
+
+  function renderSleepTab(stats) {
+    const el = document.getElementById('dash-sleep');
+    const completeSleep = stats.sleepPeriods.filter(p => p.end !== null);
+    const completeWake = stats.wakePeriods.filter(p => p.end !== null);
+
+    let html = `<div class="dash-summary">
+      <div class="summary-row"><span>Totale slaap</span><strong>${formatDuration(stats.totalSleepMin)}</strong></div>
+      <div class="summary-row"><span>Aantal dutjes</span><strong>${completeSleep.length}×</strong></div>
+      <div class="summary-row"><span>Gem. dutje</span><strong>${completeSleep.length > 0 ? formatDuration(stats.avgNapMin) : '—'}</strong></div>
+    </div>
+
+    <div class="period-section">
+      <h3 class="period-title">💤 Dutjes</h3>`;
+
+    if (stats.currentlySleeping) {
+      html += `<div class="period-item period-live">
+        <span class="live-dot"></span>
+        <span>${formatTime(stats.currentlySleeping.start)} → nu</span>
+        <span class="period-dur" id="live-sleep-dur">${formatDuration(getPeriodMinutes(stats.currentlySleeping))}</span>
+      </div>`;
+    }
+    if (completeSleep.length === 0 && !stats.currentlySleeping) {
+      html += '<p class="empty-state">Nog geen dutjes gelogd</p>';
+    }
+    completeSleep.forEach(p => {
+      html += `<div class="period-item">
+        <span>${formatTime(p.start)} → ${formatTime(p.end)}</span>
+        <span class="period-dur">${formatDuration((p.end - p.start) / 60000)}</span>
+      </div>`;
+    });
+    html += `</div>
+
+    <div class="period-section">
+      <h3 class="period-title">☀️ Wakkertijden</h3>`;
+
+    if (stats.currentlyAwake) {
+      const dur = getPeriodMinutes(stats.currentlyAwake);
+      const warn = dur > 90;
+      html += `<div class="period-item period-live ${warn ? 'period-warn' : ''}">
+        <span class="live-dot"></span>
+        <span>${formatTime(stats.currentlyAwake.start)} → nu ${warn ? '⚠️' : ''}</span>
+        <span class="period-dur" id="live-wake-dur">${formatDuration(dur)}</span>
+      </div>`;
+    }
+    if (completeWake.length === 0 && !stats.currentlyAwake) {
+      html += '<p class="empty-state">Nog geen wakkertijden gelogd</p>';
+    }
+    completeWake.forEach(p => {
+      html += `<div class="period-item">
+        <span>${formatTime(p.start)} → ${formatTime(p.end)}</span>
+        <span class="period-dur">${formatDuration((p.end - p.start) / 60000)}</span>
+      </div>`;
+    });
+    html += '</div>';
+
+    el.innerHTML = html;
+  }
+
+  function renderCryTab(stats) {
+    const el = document.getElementById('dash-cry');
+    let html = `<div class="dash-summary">
+      <div class="summary-row"><span>Totale huiltijd</span><strong>${stats.totalCryMin} min</strong></div>
+      <div class="summary-row"><span>Aantal momenten</span><strong>${stats.cries.length}×</strong></div>
+    </div>
+    <div class="period-section">
+      <h3 class="period-title">😢 Huilmomenten</h3>`;
+
+    if (stats.cries.length === 0) {
+      html += '<p class="empty-state">Geen huilmomenten gelogd</p>';
+    } else {
+      stats.cries.forEach(r => {
+        html += `<div class="period-item">
+          <span>${formatTime(new Date(r.fields.Timestamp))}</span>
+          <span class="period-dur">${r.fields.Duration || 0} min</span>
+        </div>`;
+      });
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
+  function renderFeedingTab(stats) {
+    const el = document.getElementById('dash-feeding');
+    let html = `<div class="dash-summary">
+      <div class="summary-row"><span>Aangeboden</span><strong>${stats.totalFeedingsOffered}×</strong></div>
+      <div class="summary-row"><span>Gelukt / Niet gelukt</span><strong>${stats.successFeedings}× / ${stats.failedFeedings}×</strong></div>
+      <div class="summary-row"><span>Gem. per wakkertijd</span><strong>${stats.avgFeedingsPerWakePeriod.toFixed(1)}×</strong></div>
+    </div>
+    <div class="period-section">
+      <h3 class="period-title">🤱 Per wakkertijd</h3>`;
+
+    if (stats.feedingsPerWakePeriod.length === 0) {
+      html += '<p class="empty-state">Geen wakkertijden gelogd</p>';
+    } else {
+      stats.feedingsPerWakePeriod.forEach(fp => {
+        const endLabel = fp.wakePeriod.end ? formatTime(fp.wakePeriod.end) : 'nu';
+        html += `<div class="feeding-period-item">
+          <div class="feeding-period-header">${formatTime(fp.wakePeriod.start)} → ${endLabel}</div>
+          <div class="feeding-period-stats">
+            <span>${fp.count}× aangeboden</span>
+            ${fp.successCount > 0 ? `<span>· ${fp.successCount}× gelukt (${formatDuration(fp.totalDurMin)})</span>` : ''}
+          </div>
+        </div>`;
+      });
+    }
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
+  function renderDashboard(stats) {
+    lastDashStats = stats;
+    renderOverview(stats);
+    renderSleepTab(stats);
+    renderCryTab(stats);
+    renderFeedingTab(stats);
+
+    if (liveTimerInterval) clearInterval(liveTimerInterval);
+    if (stats.currentlySleeping || stats.currentlyAwake) {
+      liveTimerInterval = setInterval(updateLiveTimers, 30000);
+    }
+  }
+
+  function updateLiveTimers() {
+    if (!lastDashStats) return;
+    if (lastDashStats.currentlySleeping) {
+      const dur = formatDuration(getPeriodMinutes(lastDashStats.currentlySleeping));
+      const a = document.getElementById('live-sleep-time');
+      const b = document.getElementById('live-sleep-dur');
+      if (a) a.textContent = dur;
+      if (b) b.textContent = dur;
+    }
+    if (lastDashStats.currentlyAwake) {
+      const dur = formatDuration(getPeriodMinutes(lastDashStats.currentlyAwake));
+      const a = document.getElementById('live-wake-time');
+      const b = document.getElementById('live-wake-dur');
+      if (a) a.textContent = dur;
+      if (b) b.textContent = dur;
+    }
+  }
+
+  async function refreshDashboard(forceRefresh = false) {
+    const loading = document.getElementById('dashboard-loading');
+    loading.classList.remove('hidden');
     try {
-      const records = await fetchTodayRecords();
-      const summary = computeTodaySummary(records);
-      renderTodaySummary(summary);
+      const records = await fetchTodayRecords(forceRefresh);
+      const stats = computeDashboard(records);
+      renderDashboard(stats);
     } catch (err) {
-      console.error('Today view error:', err);
+      console.error('Dashboard error:', err);
     } finally {
       loading.classList.add('hidden');
     }
   }
 
-  function computeTodaySummary(records) {
-    let feedingCount = 0;
-    let totalDurationSecs = 0;
-    let lastFeedingTime = null;
-    let tempCount = 0;
-    let latestTemp = null;
-    let latestTempTime = null;
-    let peeCount = 0;
-    let poopCount = 0;
-    let vitaminD = false;
-    let vitaminDRecordId = null;
-    let vitaminK = false;
-    let vitaminKRecordId = null;
-
-    records.forEach(r => {
-      const f = r.fields;
-      const ts = new Date(f.Timestamp);
-      switch (f.Type) {
-        case 'feeding':
-          feedingCount++;
-          totalDurationSecs += f.Duration || 0;
-          if (!lastFeedingTime || ts > lastFeedingTime) lastFeedingTime = ts;
-          break;
-        case 'temperature':
-          tempCount++;
-          if (!latestTempTime || ts > latestTempTime) {
-            latestTemp = f.Temperature;
-            latestTempTime = ts;
-          }
-          break;
-        case 'pee':
-          peeCount++;
-          break;
-        case 'poop':
-          poopCount++;
-          break;
-        case 'vitamin_d':
-          vitaminD = true;
-          vitaminDRecordId = r.id;
-          break;
-        case 'vitamin_k':
-          vitaminK = true;
-          vitaminKRecordId = r.id;
-          break;
-      }
-    });
-
-    return {
-      feedingCount,
-      totalMinutes: Math.round(totalDurationSecs / 60),
-      lastFeedingTime,
-      tempCount,
-      latestTemp,
-      peeCount,
-      poopCount,
-      vitaminD,
-      vitaminDRecordId,
-      vitaminK,
-      vitaminKRecordId,
-    };
-  }
-
-  function renderTodaySummary(s) {
-    document.getElementById('stat-feedings').textContent = s.feedingCount;
-    document.getElementById('stat-feeding-detail').textContent = `${s.totalMinutes} min`;
-    const lastFeedEl = document.getElementById('stat-last-feed');
-    if (s.lastFeedingTime) {
-      lastFeedEl.textContent = `Last feed: ${formatTimeSince(s.lastFeedingTime)}`;
-    } else {
-      lastFeedEl.textContent = '';
-    }
-
-    if (s.latestTemp !== null) {
-      document.getElementById('stat-temperature').textContent =
-        `${s.latestTemp.toFixed(1)}\u00B0`;
-      document.getElementById('stat-temp-detail').textContent =
-        `${s.tempCount} reading${s.tempCount !== 1 ? 's' : ''}`;
-    } else {
-      document.getElementById('stat-temperature').textContent = '\u2013';
-      document.getElementById('stat-temp-detail').textContent = '';
-    }
-
-    document.getElementById('stat-pee').textContent = s.peeCount;
-    document.getElementById('stat-poop').textContent = s.poopCount;
-
-    // Sync vitamin checkboxes with Airtable data
-    syncVitaminCheckboxes(s);
-  }
-
-  function formatTimeSince(date) {
-    const diffMs = Date.now() - date.getTime();
-    const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 1) return 'just now';
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const hours = Math.floor(diffMin / 60);
-    const mins = diffMin % 60;
-    return `${hours}h ${mins}m ago`;
-  }
-
-  // ── History View ────────────────────────────────────────────
-
+  // ── History View ──────────────────────────────────────────
   let historyOffset = null;
   let historyRecords = [];
   let isLoadingHistory = false;
@@ -603,14 +743,12 @@
       historyRecords.push(...data.records);
       historyOffset = data.offset || null;
       renderHistoryList();
-      if (historyOffset) {
-        document.getElementById('btn-load-more').classList.remove('hidden');
-      }
+      if (historyOffset) document.getElementById('btn-load-more').classList.remove('hidden');
       if (historyRecords.length === 0) {
         document.getElementById('history-empty').classList.remove('hidden');
       }
     } catch (err) {
-      console.error('History view error:', err);
+      console.error('History error:', err);
     } finally {
       loading.classList.add('hidden');
       isLoadingHistory = false;
@@ -624,16 +762,11 @@
     groups.forEach(group => {
       const section = document.createElement('div');
       section.className = 'day-group';
-
       const header = document.createElement('div');
       header.className = 'day-header';
       header.textContent = group.label;
       section.appendChild(header);
-
-      group.records.forEach(record => {
-        section.appendChild(createEventRow(record));
-      });
-
+      group.records.forEach(record => section.appendChild(createEventRow(record)));
       container.appendChild(section);
     });
   }
@@ -642,19 +775,21 @@
     const map = new Map();
     records.forEach(r => {
       const ts = new Date(r.fields.Timestamp);
-      const key = ts.toLocaleDateString(undefined, {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
+      const key = ts.toLocaleDateString('nl-NL', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
       });
-      if (!map.has(key)) {
-        map.set(key, { label: key, records: [] });
-      }
+      if (!map.has(key)) map.set(key, { label: key, records: [] });
       map.get(key).records.push(r);
     });
     return Array.from(map.values());
   }
+
+  const EVENT_ICONS = {
+    sleep_start: '🌙',
+    wake: '☀️',
+    cry: '😢',
+    feeding_offered: '🤱',
+  };
 
   function createEventRow(record) {
     const f = record.fields;
@@ -663,8 +798,7 @@
 
     const icon = document.createElement('div');
     icon.className = 'event-icon';
-    const icons = { feeding: '\u{1F37C}', temperature: '\u{1F321}', pee: '\u{1F4A7}', poop: '\u{1F4A9}', vitamin_d: '\u2600\uFE0F', vitamin_k: '\u{1F48A}' };
-    icon.textContent = icons[f.Type] || '';
+    icon.textContent = EVENT_ICONS[f.Type] || '•';
 
     const info = document.createElement('div');
     info.className = 'event-info';
@@ -675,82 +809,62 @@
 
     const time = document.createElement('div');
     time.className = 'event-time';
-    const ts = f.Type === 'feeding' && f.StartTime
+    const ts = f.Type === 'feeding_offered' && f.StartTime
       ? new Date(f.StartTime)
       : new Date(f.Timestamp);
-    time.textContent = ts.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    time.textContent = ts.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
 
     info.appendChild(desc);
     info.appendChild(time);
     row.appendChild(icon);
     row.appendChild(info);
 
-    // Delete button
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'event-delete';
-    deleteBtn.innerHTML = '&#x1F5D1;&#xFE0F;';
-    deleteBtn.setAttribute('aria-label', 'Delete entry');
+    deleteBtn.innerHTML = '🗑️';
+    deleteBtn.setAttribute('aria-label', 'Verwijder');
     deleteBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (!confirm('Delete this entry?')) return;
+      if (!confirm('Deze registratie verwijderen?')) return;
       try {
         await deleteRecord(record.id);
-        historyRecords = historyRecords.filter(r => r.id !== record.id);
-        renderHistoryList();
-        refreshTodayView();
-        showToast('Entry deleted', 'success');
-      } catch (err) {
-        // error already shown by apiRequest
-      }
+        optimisticDelete(record.id);
+        showToast('Verwijderd', 'success');
+      } catch (err) { /* error toast already shown */ }
     });
     row.appendChild(deleteBtn);
-
     return row;
   }
 
-  function formatEventDesc(fields) {
-    switch (fields.Type) {
-      case 'feeding': {
-        const side = fields.Side
-          ? fields.Side.charAt(0).toUpperCase() + fields.Side.slice(1)
-          : '';
-        const mins = fields.Duration ? Math.round(fields.Duration / 60) : 0;
-        return `Feeding \u2013 ${side}, ${mins} min`;
-      }
-      case 'temperature':
-        return `Temperature: ${(fields.Temperature || 0).toFixed(1)} \u00B0C`;
-      case 'pee':
-        return 'Pee diaper';
-      case 'poop':
-        return 'Poop diaper';
-      case 'vitamin_d':
-        return 'Vitamin D given';
-      case 'vitamin_k':
-        return 'Vitamin K given';
-      default:
-        return fields.Type || 'Unknown';
+  function formatEventDesc(f) {
+    switch (f.Type) {
+      case 'sleep_start': return 'Slapen gestart';
+      case 'wake':        return 'Wakker geworden';
+      case 'cry':         return `Gehuild — ${f.Duration || 0} min`;
+      case 'feeding_offered':
+        if (f.FeedingSuccess === 'Succes!') {
+          return `Borstvoeding gelukt — ${f.Duration || 0} min`;
+        }
+        return 'Borstvoeding aangeboden — niet gelukt';
+      default: return f.Type || 'Onbekend';
     }
   }
 
-  // ── Toast ───────────────────────────────────────────────────
-
+  // ── Toast ─────────────────────────────────────────────────
   let toastTimeout = null;
 
   function showToast(message, type) {
     const toast = document.getElementById('toast');
     toast.textContent = message;
     toast.className = 'toast';
-    if (type === 'error') toast.classList.add('toast-error');
+    if (type === 'error')   toast.classList.add('toast-error');
     if (type === 'success') toast.classList.add('toast-success');
     toast.classList.remove('hidden');
     clearTimeout(toastTimeout);
-    toastTimeout = setTimeout(() => {
-      toast.classList.add('hidden');
-    }, 2500);
+    toastTimeout = setTimeout(() => toast.classList.add('hidden'), 2500);
   }
 
-  // ── Config Modal ────────────────────────────────────────────
-
+  // ── Config Modal ──────────────────────────────────────────
   function showConfigModal() {
     const c = getConfig();
     document.getElementById('input-token').value = c.token;
@@ -769,14 +883,14 @@
     const tableName = document.getElementById('input-table-name').value;
 
     if (!token.trim() || !baseId.trim()) {
-      showToast('Token and Base ID are required', 'error');
+      showToast('Token en Base ID zijn verplicht', 'error');
       return;
     }
 
     saveConfig(token, baseId, tableName);
     hideConfigModal();
-    showToast('Settings saved', 'success');
-
+    showToast('Instellingen opgeslagen', 'success');
+    todayRecordsCache = null;
     refreshAll();
   }
 
@@ -784,85 +898,6 @@
     document.getElementById('btn-settings').addEventListener('click', showConfigModal);
     document.getElementById('btn-config-cancel').addEventListener('click', hideConfigModal);
     document.getElementById('btn-config-save').addEventListener('click', handleConfigSave);
-  }
-
-  // ── Daily Vitamins (synced via Airtable) ───────────────────
-
-  let vitaminDRecordId = null;
-  let vitaminKRecordId = null;
-  let vitaminBusy = false; // prevent double-tap
-
-  function syncVitaminCheckboxes(summary) {
-    const checkD = document.getElementById('check-vitamin-d');
-    const checkK = document.getElementById('check-vitamin-k');
-
-    checkD.checked = summary.vitaminD;
-    checkK.checked = summary.vitaminK;
-    vitaminDRecordId = summary.vitaminDRecordId;
-    vitaminKRecordId = summary.vitaminKRecordId;
-
-    updateVitaminUI(checkD, checkK);
-  }
-
-  function updateVitaminUI(checkD, checkK) {
-    const labelD = document.getElementById('label-vitamin-d');
-    const labelK = document.getElementById('label-vitamin-k');
-    labelD.classList.toggle('checked', checkD.checked);
-    labelK.classList.toggle('checked', checkK.checked);
-  }
-
-  async function handleVitaminToggle(type, checkbox) {
-    if (vitaminBusy) { checkbox.checked = !checkbox.checked; return; }
-    vitaminBusy = true;
-
-    const checkD = document.getElementById('check-vitamin-d');
-    const checkK = document.getElementById('check-vitamin-k');
-
-    try {
-      if (checkbox.checked) {
-        // Create record in Airtable
-        const result = await createRecord({
-          Type: type,
-          Timestamp: new Date().toISOString(),
-        });
-        if (result && result.records && result.records[0]) {
-          if (type === 'vitamin_d') vitaminDRecordId = result.records[0].id;
-          if (type === 'vitamin_k') vitaminKRecordId = result.records[0].id;
-          showToast(type === 'vitamin_d' ? 'Vitamin D logged' : 'Vitamin K logged', 'success');
-        }
-      } else {
-        // Delete record from Airtable
-        const recordId = type === 'vitamin_d' ? vitaminDRecordId : vitaminKRecordId;
-        if (recordId) {
-          await deleteRecord(recordId);
-          if (type === 'vitamin_d') vitaminDRecordId = null;
-          if (type === 'vitamin_k') vitaminKRecordId = null;
-          showToast(type === 'vitamin_d' ? 'Vitamin D removed' : 'Vitamin K removed', 'success');
-        }
-      }
-      updateVitaminUI(checkD, checkK);
-      refreshAll();
-    } catch (err) {
-      // Revert checkbox on error
-      checkbox.checked = !checkbox.checked;
-      updateVitaminUI(checkD, checkK);
-    } finally {
-      vitaminBusy = false;
-    }
-  }
-
-  function initVitamins() {
-    const checkD = document.getElementById('check-vitamin-d');
-    const checkK = document.getElementById('check-vitamin-k');
-
-    checkD.addEventListener('change', () => handleVitaminToggle('vitamin_d', checkD));
-    checkK.addEventListener('change', () => handleVitaminToggle('vitamin_k', checkK));
-  }
-
-  // ── Init ────────────────────────────────────────────────────
-
-  function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   function initHistoryLoadMore() {
@@ -877,18 +912,22 @@
     }
   }
 
+  // ── Init ──────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', () => {
+    initTabNav();
     initLogView();
-    initConfigModal();
+    initDashboard();
     initHistoryLoadMore();
-    initVitamins();
+    initConfigModal();
     registerServiceWorker();
-    restoreTimer();
 
     if (!isConfigured()) {
       showConfigModal();
     } else {
       refreshAll();
     }
+
+    // Refresh time inputs every minute so default stays current
+    setInterval(resetTimeInputs, 60000);
   });
 })();

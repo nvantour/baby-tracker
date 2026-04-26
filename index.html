@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="nl">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -13,176 +13,144 @@
 </head>
 <body>
 
-  <!-- Header -->
   <header id="header">
     <h1>Baby Tracker</h1>
-    <button id="btn-settings" aria-label="Settings">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <nav class="header-tabs">
+      <button class="tab-btn active" data-tab="log">Log</button>
+      <button class="tab-btn" data-tab="dashboard">Dashboard</button>
+    </nav>
+    <button id="btn-settings" aria-label="Instellingen">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"/>
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
       </svg>
     </button>
   </header>
 
-  <!-- Main Content — Single Scrollable Page -->
-  <main id="main">
+  <!-- ── Log View ── -->
+  <main id="view-log">
 
-    <!-- Section: Log -->
+    <!-- Slaap -->
     <section class="section">
-      <div class="log-grid">
-        <button class="log-card" id="card-feeding">
-          <span class="log-icon">&#x1F37C;</span>
-          <span class="log-label">Breastfeeding</span>
-        </button>
-        <button class="log-card" id="card-temperature">
-          <span class="log-icon">&#x1F321;</span>
-          <span class="log-label">Temperature</span>
-        </button>
-        <button class="log-card" id="card-pee">
-          <span class="log-icon">&#x1F4A7;</span>
-          <span class="log-label">Pee Diaper</span>
-        </button>
-        <button class="log-card" id="card-poop">
-          <span class="log-icon">&#x1F4A9;</span>
-          <span class="log-label">Poop Diaper</span>
-        </button>
-      </div>
+      <h2 class="section-title">🌙 Slaap</h2>
 
-      <!-- Feeding Sub-Panel -->
-      <div id="panel-feeding" class="sub-panel hidden">
-        <div class="panel-header">
-          <h3>Breastfeeding</h3>
-          <button class="panel-close" id="close-feeding" aria-label="Close">&times;</button>
-        </div>
-        <p class="panel-instruction">Choose a side to start the timer</p>
-        <div class="side-buttons">
-          <button class="side-btn" data-side="left">Left</button>
-          <button class="side-btn" data-side="right">Right</button>
-        </div>
-        <div id="timer-section" class="hidden">
-          <div class="timer-display" id="timer-display">00:00</div>
-          <p class="timer-side-label" id="timer-side-label"></p>
-          <div class="timer-actions">
-            <button class="btn-pause" id="btn-pause-timer">Pause</button>
-            <button class="btn-stop" id="btn-stop-timer">Stop &amp; Log</button>
-          </div>
-        </div>
-        <div id="rest-section" class="hidden">
-          <p class="rest-label">Rest time</p>
-          <div class="timer-display" id="rest-display">03:00</div>
-          <button class="btn-secondary btn-skip" id="btn-skip-rest">Skip</button>
+      <div class="log-row">
+        <span class="log-row-label">Start slaaptijd</span>
+        <div class="log-row-controls">
+          <button class="btn-now" id="btn-sleep-now">Vanaf nu</button>
+          <input type="time" class="time-input" id="input-sleep-time">
+          <button class="btn-log-sm" id="btn-sleep-log">Log</button>
         </div>
       </div>
 
-      <!-- Temperature Sub-Panel -->
-      <div id="panel-temperature" class="sub-panel hidden">
-        <div class="panel-header">
-          <h3>Temperature</h3>
-          <button class="panel-close" id="close-temperature" aria-label="Close">&times;</button>
+      <div class="log-row">
+        <span class="log-row-label">Wakker</span>
+        <div class="log-row-controls">
+          <button class="btn-now" id="btn-wake-now">Vanaf nu</button>
+          <input type="time" class="time-input" id="input-wake-time">
+          <button class="btn-log-sm" id="btn-wake-log">Log</button>
         </div>
-        <div class="stepper">
-          <button class="stepper-btn" id="temp-minus" aria-label="Decrease temperature">&minus;</button>
-          <span class="stepper-value" id="temp-value">37.0</span>
-          <span class="stepper-unit">&deg;C</span>
-          <button class="stepper-btn" id="temp-plus" aria-label="Increase temperature">+</button>
-        </div>
-        <button class="btn-confirm" id="btn-log-temp">Log Temperature</button>
       </div>
     </section>
 
-    <!-- Section: Daily Vitamins -->
+    <!-- Huilen -->
     <section class="section">
-      <h2 class="section-title">Daily Vitamins</h2>
-      <div class="vitamin-row">
-        <label class="vitamin-check" id="label-vitamin-d">
-          <input type="checkbox" id="check-vitamin-d">
-          <span class="vitamin-label">&#x2600;&#xFE0F; Vitamin D</span>
-        </label>
-        <label class="vitamin-check" id="label-vitamin-k">
-          <input type="checkbox" id="check-vitamin-k">
-          <span class="vitamin-label">&#x1F48A; Vitamin K</span>
-        </label>
+      <h2 class="section-title">😢 Huilen</h2>
+      <div class="stepper-row">
+        <button class="stepper-btn" id="cry-minus" aria-label="Minder">−</button>
+        <div class="stepper-center">
+          <span class="stepper-value" id="cry-value">5</span>
+          <span class="stepper-unit">min</span>
+        </div>
+        <button class="stepper-btn" id="cry-plus" aria-label="Meer">+</button>
+        <button class="btn-log-inline" id="btn-cry-log">Log</button>
       </div>
     </section>
 
-    <!-- Section: Today's Summary -->
+    <!-- Borstvoeding -->
     <section class="section">
-      <h2 class="section-title">Today</h2>
-      <p class="section-subtitle" id="today-date"></p>
-      <div id="today-loading" class="loading hidden">Loading...</div>
-      <div id="today-stats">
-        <div class="stat-row">
-          <div class="stat-card stat-feeding">
-            <div class="stat-icon">&#x1F37C;</div>
-            <div class="stat-content">
-              <div class="stat-value" id="stat-feedings">0</div>
-              <div class="stat-label">feedings</div>
-              <div class="stat-detail" id="stat-feeding-detail">0 min</div>
+      <h2 class="section-title">🤱 Borstvoeding aangeboden</h2>
+      <div class="outcome-buttons">
+        <button class="btn-outcome outcome-success" id="btn-feeding-success">Gelukt</button>
+        <button class="btn-outcome outcome-failed" id="btn-feeding-failed">Niet gelukt</button>
+      </div>
+      <div id="feeding-success-form" class="success-form hidden">
+        <div class="form-field">
+          <label class="form-label" for="input-feeding-start">Starttijd</label>
+          <input type="time" class="time-input" id="input-feeding-start">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Duur</label>
+          <div class="stepper-row">
+            <button class="stepper-btn" id="feeding-minus" aria-label="Minder">−</button>
+            <div class="stepper-center">
+              <span class="stepper-value" id="feeding-value">10</span>
+              <span class="stepper-unit">min</span>
             </div>
-          </div>
-          <div class="stat-card stat-temperature">
-            <div class="stat-icon">&#x1F321;</div>
-            <div class="stat-content">
-              <div class="stat-value" id="stat-temperature">&ndash;</div>
-              <div class="stat-label">temp</div>
-              <div class="stat-detail" id="stat-temp-detail"></div>
-            </div>
-          </div>
-          <div class="stat-card stat-pee">
-            <div class="stat-icon">&#x1F4A7;</div>
-            <div class="stat-content">
-              <div class="stat-value" id="stat-pee">0</div>
-              <div class="stat-label">pee</div>
-            </div>
-          </div>
-          <div class="stat-card stat-poop">
-            <div class="stat-icon">&#x1F4A9;</div>
-            <div class="stat-content">
-              <div class="stat-value" id="stat-poop">0</div>
-              <div class="stat-label">poop</div>
-            </div>
+            <button class="stepper-btn" id="feeding-plus" aria-label="Meer">+</button>
           </div>
         </div>
-        <div class="stat-sub" id="stat-last-feed"></div>
+        <button class="btn-confirm" id="btn-feeding-save">Opslaan</button>
       </div>
     </section>
 
-    <!-- Section: History -->
+    <!-- Geschiedenis -->
     <section class="section">
-      <h2 class="section-title">History</h2>
-      <div id="history-loading" class="loading hidden">Loading...</div>
+      <h2 class="section-title">Geschiedenis</h2>
+      <div id="history-loading" class="loading hidden">Laden…</div>
       <div id="history-list"></div>
-      <button id="btn-load-more" class="btn-load-more hidden">Load more</button>
-      <div id="history-empty" class="empty-state hidden">No entries yet</div>
+      <button id="btn-load-more" class="btn-load-more hidden">Meer laden</button>
+      <div id="history-empty" class="empty-state hidden">Nog geen registraties</div>
     </section>
 
   </main>
 
-  <!-- Config Modal -->
+  <!-- ── Dashboard View ── -->
+  <main id="view-dashboard" class="hidden">
+
+    <div class="dash-tabs-wrap">
+      <div class="dash-tabs">
+        <button class="dash-tab active" data-dash="overview">Overzicht</button>
+        <button class="dash-tab" data-dash="sleep">Slaap</button>
+        <button class="dash-tab" data-dash="cry">Huilen</button>
+        <button class="dash-tab" data-dash="feeding">Voeding</button>
+      </div>
+    </div>
+
+    <div id="dashboard-loading" class="loading hidden">Laden…</div>
+
+    <div id="dash-overview" class="dash-view section"></div>
+    <div id="dash-sleep"    class="dash-view section hidden"></div>
+    <div id="dash-cry"      class="dash-view section hidden"></div>
+    <div id="dash-feeding"  class="dash-view section hidden"></div>
+
+  </main>
+
+  <!-- ── Config Modal ── -->
   <div id="config-modal" class="modal-overlay hidden">
     <div class="modal">
-      <h2>Airtable Settings</h2>
-      <p class="modal-help">To set up Airtable:</p>
-      <ol class="modal-help-list">
-        <li>Create a base at <strong>airtable.com</strong></li>
-        <li>Add a table named <strong>BabyLog</strong> with fields: Type (single select), Timestamp (date time), Side (single select), StartTime (date time), Duration (number), Temperature (number)</li>
-        <li>Create a token at <strong>airtable.com/create/tokens</strong> with data.records:read and data.records:write scopes</li>
-        <li>Copy your Base ID from the URL (starts with <strong>app</strong>)</li>
-      </ol>
+      <h2>Airtable instellingen</h2>
+      <p class="modal-help">Maak een tabel <strong>BabyLog</strong> aan met deze velden:</p>
+      <ul class="modal-help-list">
+        <li><strong>Type</strong> — single select</li>
+        <li><strong>Timestamp</strong> — date time</li>
+        <li><strong>Duration</strong> — number (minuten)</li>
+        <li><strong>StartTime</strong> — date time</li>
+        <li><strong>FeedingSuccess</strong> — single select (Succes! / Ze wilde niet)</li>
+      </ul>
       <label for="input-token">API Token</label>
-      <input type="password" id="input-token" placeholder="pat...">
+      <input type="password" id="input-token" placeholder="pat…">
       <label for="input-base-id">Base ID</label>
       <input type="text" id="input-base-id" placeholder="appXXXXXXXXXXXXXX">
-      <label for="input-table-name">Table Name</label>
+      <label for="input-table-name">Tabelnaam</label>
       <input type="text" id="input-table-name" placeholder="BabyLog" value="BabyLog">
       <div class="modal-actions">
-        <button id="btn-config-cancel" class="btn-secondary">Cancel</button>
-        <button id="btn-config-save" class="btn-primary">Save</button>
+        <button id="btn-config-cancel" class="btn-secondary">Annuleren</button>
+        <button id="btn-config-save" class="btn-primary">Opslaan</button>
       </div>
     </div>
   </div>
 
-  <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
 
   <script src="app.js"></script>
