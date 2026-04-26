@@ -214,7 +214,7 @@
     if (result) {
       showToast('Slaaptijd gelogd', 'success');
       optimisticRefresh(result.records[0]);
-      resetTimeInputs();
+      resetTimeInput('input-sleep-time');
     }
   }
 
@@ -226,7 +226,7 @@
     if (result) {
       showToast('Wakker gelogd', 'success');
       optimisticRefresh(result.records[0]);
-      resetTimeInputs();
+      resetTimeInput('input-wake-time');
     }
   }
 
@@ -318,15 +318,38 @@
   let cryMinutes = 5;
   let feedingMinutes = 10;
 
-  function resetTimeInputs() {
-    const t = getCurrentTimeStr();
-    document.getElementById('input-sleep-time').value = t;
-    document.getElementById('input-wake-time').value = t;
-    document.getElementById('input-feeding-start').value = t;
+  // Track which time inputs the user has manually edited
+  const touchedInputs = new Set();
+
+  function resetTimeInput(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = getCurrentTimeStr();
+    touchedInputs.delete(id);
+  }
+
+  function initTimeInput(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (!el.value) el.value = getCurrentTimeStr();
+    el.addEventListener('input', () => touchedInputs.add(id));
+    el.addEventListener('change', () => touchedInputs.add(id));
+  }
+
+  function tickTimeInputs() {
+    // Only auto-update fields the user hasn't touched
+    ['input-sleep-time', 'input-wake-time', 'input-feeding-start'].forEach(id => {
+      if (!touchedInputs.has(id)) {
+        const el = document.getElementById(id);
+        if (el) el.value = getCurrentTimeStr();
+      }
+    });
   }
 
   function initLogView() {
-    resetTimeInputs();
+    initTimeInput('input-sleep-time');
+    initTimeInput('input-wake-time');
+    initTimeInput('input-feeding-start');
 
     // Slaap
     document.getElementById('btn-sleep-now').addEventListener('click', () => {
@@ -394,6 +417,7 @@
       logFeedingOffered(true, startTime, feedingMinutes);
       successBtn.classList.remove('selected');
       successForm.classList.add('hidden');
+      resetTimeInput('input-feeding-start');
     });
   }
 
@@ -928,6 +952,6 @@
     }
 
     // Refresh time inputs every minute so default stays current
-    setInterval(resetTimeInputs, 60000);
+    setInterval(tickTimeInputs, 60000);
   });
 })();
